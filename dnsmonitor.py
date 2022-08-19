@@ -20,6 +20,11 @@ HTTP_RETRIES = 2
 HTTP_TIMEOUT = 10
 
 
+class CircuitCreationError(Exception):
+    def __init__(self, path):
+        self.path = path
+
+
 class Result(Enum):
     SUCCESS = 0
     URL1_FAILURE = 1
@@ -51,7 +56,7 @@ class Circuit():
             if attempts > 0:
                 time.sleep(self.backoff)
             else:
-                raise Exception('Circuit creation failed.')
+                raise CircuitCreationError(self.path)
 
         def attach_stream(stream):
             if stream.status == 'NEW':
@@ -70,8 +75,11 @@ class Circuit():
 
 @click.command()
 @click.argument('exits_json', type=click.Path(exists=True, dir_okay=False))
+@click.option('--errors', '-e',
+              help='Threshold for circuit creation errors.',
+              default=0)
 @click.option('--verbose', '-v', help='Show more information.', is_flag=True)
-def main(exits_json, verbose):
+def main(exits_json, errors, verbose):
     """Check Tor Exits for DNS resolution errors.
 
     EXITS_JSON: JSON file with exit fingerprint/nickname mappings.
@@ -83,7 +91,8 @@ def main(exits_json, verbose):
     url1 = 'http://example.com/'
     url2 = 'http://93.184.216.34/'
     headers = {'Host': 'example.com'}
-    errors = 0
+    circuit_errors = []
+    error_status = False
 
     with Controller.from_port(port=int(CONTROLLER_PORT)) as controller:
         controller.authenticate(CONTROLLER_PASSWORD)
@@ -93,20 +102,28 @@ def main(exits_json, verbose):
             nickname = exits[exit_fp]
             try:
                 result = check(controller, path, url1, url2, headers)
+            except CircuitCreationError as e:
+                circuit_errors.append(nickname)
+                continue
             except Exception as e:
                 print(f'{nickname}: {e}')
-                errors += 1
+                error_status = True
                 continue
             if result == Result.URL1_FAILURE:
                 print(f'{nickname}: DNS resolution failed.')
-                errors += 1
+                error_status = True
             elif result == Result.URL2_FAILURE:
                 print(f'{nickname}: Both requests failed.')
-                errors += 1
+                error_status = True
             elif verbose:
                 click.echo(f'{nickname}: OK')
 
-    if errors:
+    if circuit_errors and len(circuit_errors) >= errors:
+        click.echo('Circuit creation failed for:')
+        for nickname in circuit_errors:
+            click.echo(f'- {nickname}')
+        error_status = True
+    if error_status:
         click.get_current_context().exit(1)
 
 
