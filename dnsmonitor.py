@@ -76,7 +76,7 @@ class Circuit():
 @click.command()
 @click.argument('exits_json', type=click.Path(exists=True, dir_okay=False))
 @click.option('--errors', '-e',
-              help='Threshold for circuit creation errors.',
+              help='Threshold for reporting circuit creation errors.',
               default=0)
 @click.option('--verbose', '-v', help='Show more information.', is_flag=True)
 def main(exits_json, errors, verbose):
@@ -92,6 +92,7 @@ def main(exits_json, errors, verbose):
     url2 = 'http://93.184.216.34/'
     headers = {'Host': 'example.com'}
     circuit_errors = []
+    output = False
     error_status = False
 
     with Controller.from_port(port=int(CONTROLLER_PORT)) as controller:
@@ -106,22 +107,29 @@ def main(exits_json, errors, verbose):
                 circuit_errors.append(nickname)
                 continue
             except Exception as e:
-                print(f'{nickname}: {e}')
+                click.echo(f'{nickname}: {e}')
+                output = True
                 error_status = True
                 continue
             if result == Result.URL1_FAILURE:
-                print(f'{nickname}: DNS resolution failed.')
+                click.echo(f'{nickname}: DNS resolution failed.')
+                output = True
                 error_status = True
             elif result == Result.URL2_FAILURE:
-                print(f'{nickname}: Both requests failed.')
+                click.echo(f'{nickname}: Both requests failed.')
+                output = True
                 error_status = True
             elif verbose:
                 click.echo(f'{nickname}: OK')
+                output = True
 
     if circuit_errors and len(circuit_errors) >= errors:
+        if output:
+            click.echo('')
         click.echo('Circuit creation failed for:')
         for nickname in circuit_errors:
             click.echo(f'- {nickname}')
+        output = True
         error_status = True
     if error_status:
         click.get_current_context().exit(1)
